@@ -3,12 +3,14 @@
 #include <Library/UefiBootServicesTableLib.h>
 #include <Library/PrintLib.h>
 #include <Library/MemoryAllocationLib.h>
+#include <Library/BaseMemoryLib.h>
 #include <Protocol/LoadedImage.h>
 #include <Protocol/SimpleFileSystem.h>
 #include <Protocol/DiskIo2.h>
 #include <Protocol/BlockIo.h>
 #include <Guid/FileInfo.h>
 #include "frame_buffer_config.hpp"
+#include "elf.hpp"
 
 struct MemoryMap {
   UINTN buffer_size;
@@ -155,6 +157,34 @@ void Halt(void) {
   while (1) __asm__("hlt");
 }
 
+void CalcLoadAddressRange(Elf64_Ehdr* ehdr, UINT64* first, UINT64* last) {
+  Elf64_Phdr* phdr = (Elf64_Phdr*)((UINT64)ehdr + ehdr->e_phoff);
+  Print(L"phdr: 0x%lx\n", (UINTN)ehdr);
+  Print(L"e_phoff: %lu\n", ehdr->e_phoff);
+  Print(L"e_phnum: %u\n", ehdr->e_phnum);
+  *first = MAX_UINT64;
+  *last = 0;
+  for (Elf64_Half i = 0; i < ehdr->e_phnum; ++i) {
+    if (phdr[i].p_type != PT_LOAD) continue;
+    Print(L"CalcLoadAddressRange: index: %u, vaddr: 0x%lx\n", i, phdr[i].p_vaddr);
+    *first = MIN(*first, phdr[i].p_vaddr);
+    *last = MAX(*last, phdr[i].p_vaddr + phdr[i].p_memsz);
+  }
+}
+
+void CopyLoadSegments(Elf64_Ehdr* ehdr) {
+  Elf64_Phdr* phdr = (Elf64_Phdr*)((UINT64)ehdr + ehdr->e_phoff);
+  for (Elf64_Half i = 0; i < ehdr->e_phnum; ++i) {
+    if (phdr[i].p_type != PT_LOAD) continue;
+
+    UINT64 segm_in_file = (UINT64)ehdr + phdr[i].p_offset;
+    CopyMem((VOID*)phdr[i].p_vaddr, (VOID*)segm_in_file, phdr[i].p_filesz);
+
+    UINTN remain_bytes = phdr[i].p_memsz - phdr[i].p_filesz;
+    SetMem((VOID*)(phdr[i].p_vaddr + phdr[i].p_filesz), remain_bytes, 0);
+  }
+}
+
 EFI_STATUS EFIAPI UefiMain(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_table) {
   EFI_STATUS status;
   Print(L"Hello, Mikan World!\n");
@@ -231,18 +261,65 @@ EFI_STATUS EFIAPI UefiMain(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
   EFI_FILE_INFO* file_info = (EFI_FILE_INFO*)file_info_buffer;
   UINTN kernel_file_size = file_info->FileSize;
 
-  EFI_PHYSICAL_ADDRESS kernel_base_addr = 0x100000;
-  status = gBS->AllocatePages(AllocateAddress, EfiLoaderData, (kernel_file_size + 0xfff) / 0x1000, &kernel_base_addr);
+  VOID* kernel_buffer;
+  status = gBS->AllocatePool(EfiLoaderData, kernel_file_size, &kernel_buffer);
   if (EFI_ERROR(status)) {
-    Print(L"failed to allocate pages: %r\n", status);
+    Print(L"failed to allocate pool: %r\n", status);
     Halt();
   }
-  status = kernel_file->Read(kernel_file, &kernel_file_size, (VOID*)kernel_base_addr);
+  status = kernel_file->Read(kernel_file, &kernel_file_size, kernel_buffer);
+  Print(L"kernel buffer:  0x%lx\n", kernel_buffer);
+  Print(L"kernel_file_size from GetInfo: %lu\n", kernel_file_size);
   if (EFI_ERROR(status)) {
     Print(L"error: %r", status);
     Halt();
   }
-  Print(L"Kernel: 0x%01x (%lu bytes)\n", kernel_base_addr, kernel_file_size);
+
+  // バッファ先頭64バイトを16進でダンプ
+  UINT8* kb = (UINT8*)kernel_buffer;
+  Print(L"kernel_buffer: 0x%lx\n", (UINTN)kernel_buffer);
+  for (UINTN i = 0; i < 64; ++i) {
+    if (i % 16 == 0) Print(L"\n%04lx: ", i);
+    Print(L"%02x ", kb[i]);
+  }
+  Print(L"\n");
+
+  if (kernel_file_size >= sizeof(Elf64_Ehdr)) {
+    Elf64_Ehdr* ehdr = (Elf64_Ehdr*)kernel_buffer;
+
+    // 主要数値フィールド
+    Print(L"e_phoff: %lu\n", ehdr->e_phoff);
+    Print(L"e_phentsize: %u\n", ehdr->e_phentsize);
+    Print(L"e_phnum: %u\n", ehdr->e_phnum);
+    Print(L"e_entry: 0x%lx\n", ehdr->e_entry);
+  } else {
+    Print(L"kernel_file_size (%lu) is smaller than Elf64_Ehdr (%lu)\n",
+          kernel_file_size, (UINTN)sizeof(Elf64_Ehdr));
+  }
+
+  // elfのファイルヘッダはkernel_bufferに読み込まれている
+  Elf64_Ehdr* kernel_ehdr = (Elf64_Ehdr*)kernel_buffer;
+  UINT64 kernel_first_addr, kernel_last_addr;
+  CalcLoadAddressRange(kernel_ehdr, &kernel_first_addr, &kernel_last_addr);
+
+  // 1 pageは4 byte
+  UINTN num_pages = (kernel_last_addr - kernel_first_addr + 0xfff) / 0x1000;
+  // num_pages分の大きさのメモリ領域を確保
+  status = gBS->AllocatePages(AllocateAddress, EfiLoaderData, num_pages, &kernel_first_addr);
+  if (EFI_ERROR(status)) {
+    Print(L"failed to allocate pages: %r\n", status);
+    Print(L"Try to allocate %lu pages at 0x%lx\n", num_pages, kernel_first_addr);
+    Halt();
+  }
+
+  CopyLoadSegments(kernel_ehdr);
+  Print(L"Kernel: 0x%0lx - 0x%0lx\n", kernel_first_addr, kernel_last_addr);
+
+  status = gBS->FreePool(kernel_buffer);
+  if (EFI_ERROR(status)) {
+    Print(L"failed to free pool: %r\n", status);
+    Halt();
+  }
 
   status = gBS->ExitBootServices(image_handle, memmap.map_key);
   if (EFI_ERROR(status)) {
@@ -277,7 +354,7 @@ EFI_STATUS EFIAPI UefiMain(EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *system_tab
       Halt();
   }
 
-  UINT64 entry_addr = *(UINT64*)(kernel_base_addr + 24);
+  UINT64 entry_addr = *(UINT64*)(kernel_first_addr + 24);
 
   typedef void EntryPointType(const struct FrameBufferConfig*);
   EntryPointType* entry_point = (EntryPointType*)entry_addr;
