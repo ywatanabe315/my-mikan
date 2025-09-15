@@ -1,2 +1,4 @@
+hankaku.bin
 *.o
 *.elf
+.*.d
