@@ -2,3 +2,4 @@ hankaku.bin
 *.o
 *.elf
 .*.d
+*.swp
