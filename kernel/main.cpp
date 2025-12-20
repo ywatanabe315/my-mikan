@@ -247,11 +247,8 @@ extern "C" void KernelMainNewStack(const FrameBufferConfig& frame_buffer_config_
   auto bgwindow = std::make_shared<Window>(kFrameWidth, kFrameHeight, frame_buffer_config.pixel_format);
   auto bgwriter = bgwindow->Writer();
 
-  // bgwriter->widthで落ちるかも
-  // gdbで見たところ、bgwriterのvtableが設定されてない？
-
   DrawDesktop(*bgwriter);
-  console->SetWriter(bgwriter);
+  console->SetWindow(bgwindow);
 
   auto mouse_window = std::make_shared<Window>(kMouseCursorWidth, kMouseCursorHeight, frame_buffer_config.pixel_format);
   mouse_window->SetTransparentColor(kMouseTransparentColor);
