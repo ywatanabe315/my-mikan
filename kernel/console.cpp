@@ -41,8 +41,8 @@ void Console::SetWindow(const std::shared_ptr<Window>& window) {
   Refresh();
 }
 
-void Console::SetLayerID(unsigned int latest_id) {
-  layer_id_ = layer_id_;
+void Console::SetLayerID(unsigned int layer_id) {
+  layer_id_ = layer_id;
 }
 
 unsigned int Console::LayerID() const {

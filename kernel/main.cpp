@@ -89,10 +89,10 @@ extern "C" void KernelMainNewStack(const FrameBufferConfig& frame_buffer_config_
 
   while (true) {
     ++count;
-    // sprintf(str, "%010u", count);
-    // FillRectangle(*main_window->Writer(), {24, 28}, {8 * 10, 16}, {0xc6, 0xc6, 0xc6});
-    // WriteString(*main_window->Writer(), {24, 28}, str, {0, 0, 0});
-    // layer_manager->Draw(main_window_layer_id);
+    sprintf(str, "%010u", count);
+    FillRectangle(*main_window->Writer(), {24, 28}, {8 * 10, 16}, {0xc6, 0xc6, 0xc6});
+    WriteString(*main_window->Writer(), {24, 28}, str, {0, 0, 0});
+    layer_manager->Draw(main_window_layer_id);
 
     __asm__("cli");
     if (main_queue->size() == 0) {
