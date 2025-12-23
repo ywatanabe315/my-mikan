@@ -1,6 +1,7 @@
 #include "pci.hpp"
 
 #include "asmfunc.h"
+#include "logger.hpp"
 
 namespace {
   using namespace pci;
@@ -14,12 +15,12 @@ namespace {
   }
 
   Error AddDevice(const Device& device) {
-    if (num_devices == devices.size()) {
+    if (num_device == devices.size()) {
       return MAKE_ERROR(Error::kFull);
     }
 
-    devices[num_devices] = device;
-    ++num_devices;
+    devices[num_device] = device;
+    ++num_device;
     return MAKE_ERROR(Error::kSuccess);
   }
 
@@ -184,7 +185,7 @@ namespace pci {
   }
 
   Error ScanAllBus() {
-    num_devices = 0;
+    num_device = 0;
 
     auto header_type = ReadHeaderType(0, 0, 0);
     if (IsSingleFunctionDevice(header_type)) {
@@ -269,5 +270,20 @@ namespace pci {
       msg_data |= 0xc000;
     }
     return ConfigureMSI(dev, msg_addr, msg_data, num_vector_exponent);
+  }
+}
+
+void InitializePCI() {
+  if (auto err = pci::ScanAllBus()) {
+    Log(kError, "ScanAllBus: %s\n", err.Name());
+    exit(1);
+  }
+
+  for (int i = 0; i < pci::num_device; ++i) {
+    const auto& dev = pci::devices[i];
+    auto vendor_id = pci::ReadVendorId(dev);
+    auto class_code = pci::ReadVendorId(dev);
+    Log(kDebug, "%d.%d.%d: vend %04x, class %08x, head %02x\n",
+        dev.bus, dev.device, dev.function, vendor_id, class_code, dev.header_type);
   }
 }

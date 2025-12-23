@@ -47,7 +47,7 @@ namespace pci {
   bool IsSingleFunctionDevice(uint8_t header_type);
 
   inline std::array<Device, 32> devices;
-  inline int num_devices;
+  inline int num_device;
 
   Error ScanAllBus();
 
@@ -114,3 +114,5 @@ namespace pci {
   Error ConfigureMSIFixedDestination(const Device& dev, uint8_t apic_id, MSITriggerMode trigger_mode,
                                      MSIDeliveryMode delivery_mode, uint8_t vector, unsigned int num_vector_exponent);
 }
+
+void InitializePCI();
