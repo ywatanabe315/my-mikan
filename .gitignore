@@ -3,3 +3,4 @@ hankaku.bin
 *.elf
 .*.d
 *.swp
+*.img
